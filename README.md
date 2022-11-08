@@ -1,6 +1,6 @@
 # chinook-bycatch-public
 Final R code for publication on Chinook bycatch in the hake fishery
-
+** The raw data files for this analysis are confidential and cannot be shared under the Magnuson-Stevens Act at section 402(b), 16 U.S.C. 1881a(b). Therefore, the analyses from this project are not reproducible; however, we are sharing the code to show our work as much as possible.
 
 Files include:
 

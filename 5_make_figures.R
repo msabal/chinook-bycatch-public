@@ -1,6 +1,6 @@
 # Making Figures for PNAS
 
-library(scales); library(raster); library(ggrepel)
+library(scales); library(raster); library(ggrepel); library(ggridges)
 
 # Run script 4 (4_run_models.R) FIRST.
 
@@ -42,6 +42,19 @@ full_dat %>% dplyr::select(haul_join, day_night) %>%  distinct() %>% group_by(da
 
 # SST: 
 haul_dat %>% summarise(range(sst_mean), mean(sst_mean), sd(sst_mean))
+
+# ESU sample sizes of positive catches: unique hauls
+full_dat %>% filter(esu == "klam_trinity" & catch_esu_ia_8 > 0) %>% count() #564
+full_dat %>% filter(esu == "sor_nca" & catch_esu_ia_8 > 0) %>% count() #488
+full_dat %>% filter(esu == "or_coast" & catch_esu_ia_8 > 0) %>% count() #206
+full_dat %>% filter(esu == "pug" & catch_esu_ia_8 > 0) %>% count() #184
+full_dat %>% filter(esu == "so_bc" & catch_esu_ia_8 > 0) %>% count() #334
+
+# ESU sample sizes of individual fish genotyped
+fish_dat <- readRDS(str_c(in_drive, "Saved Files/data_by_fish_v1.rds"))
+
+fish_dat %>% filter(esu %in% c("klam_trinity", "sor_nca", "or_coast", "pug", "so_bc") & prob_esu > 0.8) %>% 
+  group_by(esu) %>% count() # kt: 1052, sor_nca: 722, or_coast: 223, pug: 273, so_bc: 459
 
 
 # Figure 1: Summary of bycatch and fishing effort ----
@@ -367,52 +380,27 @@ dev.off()
 
 
 
-# Figure 5: DVM & Thermal refugia ----
+# # Figure 5: DVM & Thermal refugia (with sst and lat bins) ----
 day_night_dat <- full_dat %>% dplyr::select(haul_join, day_night) %>% distinct()
-
-ref_dvm_dat <- haul_dat %>% 
-  left_join(day_night_dat) %>% 
+ 
+ref_dvm_dat <- haul_dat %>%
+  left_join(day_night_dat) %>%
   filter(fishing_m < 600) %>%
   mutate(depth_bin = cut(fishing_m, breaks=seq(0,600,by=100)),
-         lat_bin = ifelse(lat > 45, "north", "south"),
+         lat_bin = ifelse(lat > 45, ">45 lat", "<45 lat"),
          bpue = chinook_count / duration *60,
-         sst_bin = ifelse(sst_mean > 14, "(b) SST > 14 degrees C", 
-                          ifelse(sst_mean < 14, "(a) SST < 14 degrees C", "middle"))) %>% 
-  group_by(depth_bin, day_night, sst_bin) %>%
+         sst_bin = ifelse(sst_mean > 14, ">14C",
+                          ifelse(sst_mean < 14, "<14C", "other"))) %>%
+  group_by(depth_bin, day_night, sst_bin, lat_bin) %>%
   summarise(mean_chinook = mean(chinook_count),
             mean_bpue = mean(bpue),
             sd_chinook = sd(chinook_count),
             sd_bpue = sd(bpue),
-            count = length(chinook_count)) %>% 
+            count = length(chinook_count)) %>%
   mutate(se = sd_chinook / sqrt(count),
          se_bpue = sd_bpue / sqrt(count),
          day_night = ifelse(day_night == "day", "Day", "Night"))
 ref_dvm_dat
-
-
-fig_5a <- ggplot(data=ref_dvm_dat, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
-  geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
-  facet_wrap(~sst_bin, ncol=1) +
-  scale_y_continuous(limits=c(0,5), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
-  geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
-  scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
-  scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
-  xlab("Fishing depth bin (m)") +
-  theme(strip.text = element_text(face = "bold", size=14)) +
-  theme(axis.line = element_line(colour = "black"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(),
-        legend.position = "top", legend.title = element_blank()) +
-  geom_text(aes(label=count, y = mean_bpue + se_bpue + 0.3), size=3, position=position_dodge(0.9)); fig_5a
-
-
-setwd("C:/Users/sabalm/Desktop/")
-pdf("Fig_5.pdf", width=6, height=6, onefile=FALSE)
-
-fig_5a
-
-dev.off()
 
 
 # Expand data for scenarios
@@ -420,98 +408,61 @@ depth_dat <- depth_dat %>% mutate(p_hauls = count_hauls / 54509)
 
 scenario_dat1 <- ref_dvm_dat %>% rename("fishing_bins" = "depth_bin") %>% 
   left_join(dplyr::select(depth_dat, fishing_bins, p_hauls)) %>% 
-  mutate(night_fishing_bin = "Even")
-
-scenario_dat <- scenario_dat1 %>% 
-  mutate(night_fishing_bin = "Restrictions") %>% 
-  rbind(scenario_dat1) %>% 
-  mutate(num_tows = ifelse(night_fishing_bin == "Restrictions" & day_night == "Night", 250,
-                           ifelse(night_fishing_bin == "Restrictions" & day_night == "Day", 750, 500))) %>%
-  dplyr::select(1:3,5,11:13) %>% 
-  mutate(tot_bycatch = num_tows * p_hauls * mean_bpue)
-
-scenario_dat %>% group_by(sst_bin, night_fishing_bin) %>% summarise(tot_bycatch = sum(tot_bycatch)) # This is amazing!!!
-
-sum_dat <- scenario_dat %>% group_by(sst_bin, night_fishing_bin, day_night) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>% 
-  mutate(scenario_cat = ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Even", "<14 & No restrictions", 
-                               ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Restrictions", "<14 & Restrictions",
-                                      ifelse(sst_bin == "(b) SST > 14 degrees C" & night_fishing_bin == "Even", ">14 & No restrictions", ">14 & Restrictions"))))
-sum_dat
-
-
-
-#### VERSION WITH LATITUDE BINS TOO!
-
-# Figure 5: DVM & Thermal refugia ----
-day_night_dat <- full_dat %>% dplyr::select(haul_join, day_night) %>% distinct()
-
-ref_dvm_dat2 <- haul_dat %>% 
-  left_join(day_night_dat) %>% 
-  filter(fishing_m < 600) %>%
-  mutate(depth_bin = cut(fishing_m, breaks=seq(0,600,by=100)),
-         lat_bin = ifelse(lat > 45, "north", "south"),
-         bpue = chinook_count / duration *60,
-         sst_bin = ifelse(sst_mean > 14, "(b) SST > 14 degrees C", 
-                          ifelse(sst_mean < 14, "(a) SST < 14 degrees C", "middle"))) %>% 
-  group_by(depth_bin, day_night, sst_bin, lat_bin) %>%
-  summarise(mean_chinook = mean(chinook_count),
-            mean_bpue = mean(bpue),
-            sd_chinook = sd(chinook_count),
-            sd_bpue = sd(bpue),
-            count = length(chinook_count)) %>% 
-  mutate(se = sd_chinook / sqrt(count),
-         se_bpue = sd_bpue / sqrt(count),
-         day_night = ifelse(day_night == "day", "Day", "Night"))
-ref_dvm_dat2
-
-
-fig_5a2 <- ggplot(data=ref_dvm_dat2, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
-  geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
-  facet_wrap(~sst_bin + lat_bin, ncol=2) +
-  scale_y_continuous(limits=c(0,5), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
-  geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
-  scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
-  scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
-  xlab("Fishing depth bin (m)") +
-  theme(strip.text = element_text(face = "bold", size=14)) +
-  theme(axis.line = element_line(colour = "black"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(),
-        legend.position = "top", legend.title = element_blank()) +
-  geom_text(aes(label=count, y = mean_bpue + se_bpue + 0.3), size=3, position=position_dodge(0.9)); fig_5a2
-
-
-# setwd("C:/Users/sabalm/Desktop/")
-# pdf("Fig_5.pdf", width=6, height=6, onefile=FALSE)
-# 
-# fig_5a
-# 
-# dev.off()
-
-
-# Expand data for scenarios
-depth_dat <- depth_dat %>% mutate(p_hauls = count_hauls / 54509)
-
-scenario_dat1 <- ref_dvm_dat2 %>% rename("fishing_bins" = "depth_bin") %>% 
-  left_join(dplyr::select(depth_dat, fishing_bins, p_hauls)) %>% 
   mutate(tow_hrs = ifelse(day_night == "Night", 500, 500)) 
-  
+
 scenario_dat2 <- scenario_dat1 %>% mutate(tow_hrs = ifelse(day_night == "Night", 250, 750)) 
-  
+
 scenario_dat <- rbind(scenario_dat1, scenario_dat2) %>% 
   mutate(tot_bycatch = tow_hrs * p_hauls * mean_bpue,
          night_restrict = ifelse(tow_hrs == 250 | tow_hrs == 750, "Restrictions", "Even"))
 
 # How does total bycatch vary by scenario?
-scenario_dat %>% group_by(sst_bin, lat_bin, night_restrict) %>% summarise(tot_bycatch = sum(tot_bycatch)) # This is amazing!!!
+scenario_dat %>% group_by(sst_bin, lat_bin, night_restrict) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>%  # This is amazing!!!
+  pivot_wider(names_from = night_restrict, values_from = tot_bycatch) %>% 
+  mutate(p_night_effectivness = (Restrictions - Even)/Even*100)
+# percentage reduction in bycatch (negative number) due to night fishing restrictions. Positive
+# numbers indicate bycatch was higher with night fishing restrictions.
+# Put these values as text in Figs 5a-d.
 
-sum_dat <- scenario_dat %>% group_by(sst_bin, night_fishing_bin, day_night) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>% 
-  mutate(scenario_cat = ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Even", "<14 & No restrictions", 
-                               ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Restrictions", "<14 & Restrictions",
-                                      ifelse(sst_bin == "(b) SST > 14 degrees C" & night_fishing_bin == "Even", ">14 & No restrictions", ">14 & Restrictions"))))
-sum_dat
 
+# Make function for observed DVM plots with SE bars.
+obs_dvm_plot_fun <- function(data, title){
+  ggplot(data=data, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
+    geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
+    scale_y_continuous(limits=c(0,5), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
+    geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
+    scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
+    scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
+    xlab("Fishing depth bin (m)") +
+    theme(strip.text = element_text(face = "bold", size=14)) +
+    theme(axis.line = element_line(colour = "black"),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_blank(),
+          legend.position = "top", legend.title = element_blank()) +
+    geom_text(aes(label=count, y = mean_bpue + se_bpue + 0.3), size=3, position=position_dodge(0.9)) +
+    ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5))
+} # end function
+
+
+fig_5a <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == ">45 lat" & sst_bin == "<14C"), title="(a) North: cool SSTs") +
+  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 22.5%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5a
+fig_5b <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == ">45 lat" & sst_bin == ">14C"), title="(b) North: warm SSTs") +
+  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 36.7%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5b
+fig_5c <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == "<14C"), title="(c) South: cool SSTs") +
+  annotate(geom = "text", label = "Night fishing restrictions would\ndecrease bycatch by 19.7%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5c
+fig_5d <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == ">14C"), title="(d) South: warm SSTs") +
+annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 0.8%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5d
+
+ggarrange(fig_5a, fig_5b, fig_5c, fig_5d, ncol=2, nrow=2, common.legend = TRUE)
+
+
+ setwd("C:/Users/sabalm/Desktop/")
+ pdf("Fig_5.pdf", width=8.5, height=8, onefile=FALSE)
+
+ ggarrange(fig_5a, fig_5b, fig_5c, fig_5d, ncol=2, nrow=2, common.legend = TRUE)
+
+ dev.off()
 
 
 
@@ -540,7 +491,6 @@ fig_s1a <- ggplot(data=depth_kt, aes(x=fishing_m, y=mean_bpue)) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 0.65), expand = c(0,0)) +
   ylab("Observed Chinook\nbycatch per hour") + xlab("Fishing depth (m)") +
-  #geom_text(aes(label=count_hauls, y=mean_bpue + se_bpue+ 0.05), size=4, angle=45) +
   ggtitle(label = "(a) Klamath - Trinity") + theme(plot.title = element_text(hjust = 0.5)); fig_s1a
 
 # Fig S1b: S. OR - N. CA
@@ -564,7 +514,6 @@ fig_s1b <- ggplot(data=depth_sor, aes(x=fishing_m, y=mean_bpue)) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 0.65), expand = c(0,0)) +
   ylab("Observed Chinook\nbycatch per hour") + xlab("Fishing depth (m)") +
-  #geom_text(aes(label=count_hauls, y=mean_bpue + se_bpue+ 0.05), size=4, angle=45) +
   ggtitle(label = "(b) S. OR - N. CA") + theme(plot.title = element_text(hjust = 0.5)); fig_s1b
 
 # Fig S1c: OR Coast
@@ -588,7 +537,6 @@ fig_s1c <- ggplot(data=depth_orc, aes(x=fishing_m, y=mean_bpue)) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 0.4), expand = c(0,0)) +
   ylab("Observed Chinook\nbycatch per hour") + xlab("Fishing depth (m)") +
-  #geom_text(aes(label=count_hauls, y=mean_bpue + se_bpue+ 0.03), size=4, angle=45) +
   ggtitle(label = "(c) OR Coast") + theme(plot.title = element_text(hjust = 0.5)); fig_s1c
 
 
@@ -613,7 +561,6 @@ fig_s1d <- ggplot(data=depth_pug, aes(x=fishing_m, y=mean_bpue)) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 0.22), expand = c(0,0)) +
   ylab("Observed Chinook\nbycatch per hour") + xlab("Fishing depth (m)") +
-  #geom_text(aes(label=count_hauls, y=mean_bpue + se_bpue+ 0.02), size=4, angle=45) +
   ggtitle(label = "(d) Puget Sound") + theme(plot.title = element_text(hjust = 0.5)); fig_s1d
 
 
@@ -638,7 +585,6 @@ fig_s1e <- ggplot(data=depth_sbc, aes(x=fishing_m, y=mean_bpue)) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 0.6), expand = c(0,0)) +
   ylab("Observed Chinook\nbycatch per hour") + xlab("Fishing depth (m)") +
-  #geom_text(aes(label=count_hauls, y=mean_bpue + se_bpue+ 0.03), size=4, angle=0) +
   ggtitle(label = "(e) S. BC") + theme(plot.title = element_text(hjust = 0.5)); fig_s1e
 
 
@@ -651,8 +597,31 @@ dev.off()
 
 
 
+# Figure S2: SST density distributions by lat ----
 
-# Figure S2: Hurdle model plots ----
+ridge_dat <- haul_dat %>% mutate(lat_bin = cut(lat, seq(41,50, by=1)))
+
+
+fig_s2 <- ggplot(data=ridge_dat, aes(x=sst_mean, y=lat_bin, fill=stat(x))) +
+  geom_density_ridges_gradient(scale=1.8) + theme_classic() +
+  scale_fill_gradient(high="red", low="royalblue", name=expression("SST " ( degree*C))) +
+  geom_vline(xintercept=c(10,12,14,16,18), color="gray", size=0.7, linetype="dashed") +
+  ylab("Latitude bin") + scale_x_continuous(breaks=seq(4,20,by=1), name=expression("SST " ( degree*C))) +
+  theme(legend.position = "right"); fig_s2
+
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s2.pdf", width=5, height=5, onefile=FALSE)
+
+fig_s2 
+
+dev.off()
+
+
+
+
+
+# Figure S3: Hurdle model plots ----
 
 # DVM function for presence-absence
 dvm_plot_fun_pa <- function(data, model, title, response){
@@ -710,51 +679,51 @@ ref_plot_fun_16_pa <- function(data, model, title, response){
 
 
 
-fig_s2a <- dvm_plot_fun_pa(data=all_dat, response="pa", model=full_mod_pa, title="(a) Probability of occurence"); fig_s2a
-fig_s2b <- dvm_plot_fun(data=all_dat_p, response="chinook_count", model=full_mod_p, title="(b) Positive Chinook bycatch"); fig_s2b
-fig_s2c <- ref_plot_fun_pa(data=all_dat, response="pa", model=full_mod_pa, title="(c) Probability of occurence"); fig_s2c
-fig_s2d <- ref_plot_fun(data=all_dat_p, response="chinook_count", model=full_mod_p, title="(d) Positive Chinook bycatch"); fig_s2d
+fig_s3a <- dvm_plot_fun_pa(data=haul_dat, response="pa", model=full_mod_pa, title="(a) Probability of occurence"); fig_s3a
+fig_s3b <- dvm_plot_fun(data=haul_dat_p, response="chinook_count", model=full_mod_p, title="(b) Positive Chinook bycatch"); fig_s3b
+fig_s3c <- ref_plot_fun_pa(data=haul_dat, response="pa", model=full_mod_pa, title="(c) Probability of occurence"); fig_s3c
+fig_s3d <- ref_plot_fun(data=haul_dat_p, response="chinook_count", model=full_mod_p, title="(d) Positive Chinook bycatch"); fig_s3d
 
 
 setwd("C:/Users/sabalm/Desktop/")
-pdf("fig_s2.pdf", width=8, height=8, onefile=FALSE)
+pdf("fig_s3.pdf", width=8, height=8, onefile=FALSE)
 
-ggarrange(fig_s2a, fig_s2b, fig_s2c, fig_s2d, ncol=2, nrow=2)
+ggarrange(fig_s3a, fig_s3b, fig_s3c, fig_s3d, ncol=2, nrow=2)
 
 dev.off()
 
 
-# Figure S3: ESU probability of occurrence DVM ----
+# Figure S4: ESU probability of occurrence DVM ----
 
-fig_s3a <- dvm_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s3a
-fig_s3b <- dvm_plot_fun_pa(data=esu_dat$data[[5]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[5]], title="(b) S. OR - N. CA"); fig_s3b
-fig_s3c <- dvm_plot_fun_pa(data=esu_dat$data[[2]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[2]], title="(c) OR Coast"); fig_s3c
-fig_s3d <- dvm_plot_fun_pa(data=esu_dat$data[[3]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[3]], title="(d) Puget Sound"); fig_s3d
-fig_s3e <- dvm_plot_fun_pa(data=esu_dat$data[[4]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[4]], title="(e) S. BC"); fig_s3e
-
-
-setwd("C:/Users/sabalm/Desktop/")
-pdf("fig_s3.pdf", width=9, height=6, onefile=FALSE)
-
-ggarrange(fig_s3a, fig_s3b, fig_s3c, fig_s3d, fig_s3e, ncol=3, nrow=2, common.legend = TRUE)
-
-dev.off()
-
-
-
-# Figure S4: ESU probability of occurrence Refugia ----
-
-fig_s4a <- ref_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s4a
-fig_s4b <- ref_plot_fun_pa(data=esu_dat$data[[5]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[5]], title="(b) S. OR - N. CA"); fig_s4b
-fig_s4c <- ref_plot_fun_pa(data=esu_dat$data[[2]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[2]], title="(c) OR Coast"); fig_s4c
-fig_s4d <- ref_plot_fun_16_pa(data=esu_dat$data[[3]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[3]], title="(d) Puget Sound"); fig_s4d
-fig_s4e <- ref_plot_fun_16_pa(data=esu_dat$data[[4]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[4]], title="(e) S. BC"); fig_s4e
+fig_s4a <- dvm_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s4a
+fig_s4b <- dvm_plot_fun_pa(data=esu_dat$data[[5]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[5]], title="(b) S. OR - N. CA"); fig_s4b
+fig_s4c <- dvm_plot_fun_pa(data=esu_dat$data[[2]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[2]], title="(c) OR Coast"); fig_s4c
+fig_s4d <- dvm_plot_fun_pa(data=esu_dat$data[[3]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[3]], title="(d) Puget Sound"); fig_s4d
+fig_s4e <- dvm_plot_fun_pa(data=esu_dat$data[[4]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[4]], title="(e) S. BC"); fig_s4e
 
 
 setwd("C:/Users/sabalm/Desktop/")
 pdf("fig_s4.pdf", width=9, height=6, onefile=FALSE)
 
 ggarrange(fig_s4a, fig_s4b, fig_s4c, fig_s4d, fig_s4e, ncol=3, nrow=2, common.legend = TRUE)
+
+dev.off()
+
+
+
+# Figure S5: ESU probability of occurrence Refugia ----
+
+fig_s5a <- ref_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s5a
+fig_s5b <- ref_plot_fun_pa(data=esu_dat$data[[5]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[5]], title="(b) S. OR - N. CA"); fig_s5b
+fig_s5c <- ref_plot_fun_pa(data=esu_dat$data[[2]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[2]], title="(c) OR Coast"); fig_s5c
+fig_s5d <- ref_plot_fun_16_pa(data=esu_dat$data[[3]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[3]], title="(d) Puget Sound"); fig_s5d
+fig_s5e <- ref_plot_fun_16_pa(data=esu_dat$data[[4]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[4]], title="(e) S. BC"); fig_s5e
+
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s5.pdf", width=9, height=6, onefile=FALSE)
+
+ggarrange(fig_s5a, fig_s5b, fig_s5c, fig_s5d, fig_s5e, ncol=3, nrow=2, common.legend = TRUE)
 
 dev.off()
 

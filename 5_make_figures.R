@@ -11,7 +11,8 @@ haul_dat
 full_mod
 esu_dat
 
-states2
+# Load natural earth file
+states2 <- readRDS(str_c(in_drive, "Saved GIS Files/naturalearth_states.rds"))
 
 # Lon x Lat
 gb_r <- raster(x = str_c(in_drive, "Raw GIS Files/gebco_2021_n50.1_s39.9_w-128.1_e-122.9.tif"))
@@ -19,17 +20,40 @@ gb_cont_200 <- rasterToContour(gb_r, levels = -200) # Get contour lines
 gb_cont_200 <- st_as_sf(gb_cont_200) # Covert to sf objects
 
 
+# Summary stats in manuscript ----
+
+# Total Chinook caught 2002 - 2021
+sum(haul_dat$chinook_count) # 67165
+
+# With average per year
+haul_dat %>% group_by(year) %>% summarise(chinook_yr = sum(chinook_count)) %>% ungroup() %>% summarise(mean(chinook_yr),
+                                                                                                       sd(chinook_yr))
+# Bycatch occurred in N = 8534 hauls out of N  = 54509 total hauls
+haul_dat %>% filter(chinook_count > 0)
+
+# 86% of hauls caught fewer than 10 chinook per hour
+haul_dat %>% filter(bpue > 0 & bpue < 10) %>% count() # 7372 / 8534 * 100 = 86%
+
+# % of hauls caught over 200 chinook per hour
+haul_dat %>% filter(bpue > 200) %>% count() # 6 hauls
+
+# 75% hauls occurred at night, 25% during day
+full_dat %>% dplyr::select(haul_join, day_night) %>%  distinct() %>% group_by(day_night) %>% count()
+
+# SST: 
+haul_dat %>% summarise(range(sst_mean), mean(sst_mean), sd(sst_mean))
+
+
 # Figure 1: Summary of bycatch and fishing effort ----
 ## This is a multi-panel Figure, which I assemble in Inkscape. Individual plots made below:
 
-
 # First calculate observed Chinook bycatch per vessel per hour.
-h_chinook <-  h_chinook %>% mutate(bpue = (chinook_count / duration) *60)
+haul_dat <-  haul_dat %>% mutate(bpue = (chinook_count / duration) *60)
 
 
 # Make dataset summarizing data by lat/lon grid cells.
 
-obs_final2 <- readRDS(str_c(in_drive, "Saved Files/MS_cleaned_ashop_all.rds"))
+haul_dat_more_covars <- readRDS(str_c(in_drive, "Saved Files/data_by_haul_v1.rds"))
 
 # Make a function to cut a numeric varible to intervals, but make the return category value be the MIDPOINT!!! (https://stackoverflow.com/questions/5915916/divide-a-range-of-values-in-bins-of-equal-length-cut-vs-cut2)
 cut2 <- function(x, breaks) {
@@ -42,14 +66,13 @@ cut2 <- function(x, breaks) {
   mid[k]
 }
 
-
-
-map_dat <- h_chinook %>% left_join(dplyr::select(obs_final2, haul_join, drvid)) %>% 
+# Summarize fishing effort and chinook catch (BPUE) by lat and lon grid cells.
+map_dat <- haul_dat %>% left_join(dplyr::select(haul_dat_more_covars, haul_join, drvid)) %>% 
   mutate(lat = cut2(lat, breaks=40), lon = cut2(lon, breaks=10)) %>% 
   group_by(lat, lon) %>% summarise(n_hauls = n(),
                                    bpue = mean(bpue),
                                    n_vessels = n_distinct(drvid)) %>% 
-  filter(n_vessels > 3)
+  filter(n_vessels > 3) # drop cells where less than 3 vessels fished (to keep fishing location data v. anonymous)
 
 
 # Figures 1a, 1b, 1c: Map of Fishing effort, observed Chinook bycatch per hour, Focal ESU latitude distributions.
@@ -87,36 +110,8 @@ fig_1b <- ggplot() + theme_classic() +
 
 
 
-# # Fishing effort (number of hauls): map
-# fig_1a <- ggplot() + theme_classic() +
-#   geom_tile(data=all_dat, aes(lon, lat, z = chinook_count), binwidth = 0.2, stat = "summary_2d", fun = length, alpha=0.5) +
-#   geom_sf(data=states2, fill = "gray95") +
-#   geom_sf(data=gb_cont_200, size=0.8) +
-#   scale_fill_gradient2(low="gray80", high="royalblue", name="Total hauls", breaks=seq(0,2000, by=500)) +
-#   theme(axis.title.x = element_blank(), axis.title.y=element_blank()) +
-#   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-#   theme(legend.position = c(0.2,0.5), legend.background=element_rect(fill = alpha("white", 0)),
-#         legend.key=element_rect(fill = alpha("white", .5)),
-#         legend.title = element_text(size=8)) +
-#   coord_sf(xlim = c(-127,-123.5),
-#            ylim = c(41.4,49)); fig_1a
-
-# # Observed Chinook bycatch per vessel per hour: map
-# fig_1b <- ggplot() + theme_classic() +
-#   geom_tile(data=filter(all_dat, bpue > 0), aes(lon, lat, z = bpue), binwidth = 0.2, stat = "summary_2d", fun = mean, alpha=0.5) +
-#   geom_sf(data=states2, fill = "gray95") +
-#   geom_sf(data=gb_cont_200, size=0.8) +
-#   scale_fill_gradient(low="gray80", high="firebrick3", name="Observed Chinook\nbycatch per hour", breaks=seq(0,50, by=5)) +
-#   theme(axis.title.x = element_blank(), axis.title.y=element_blank()) +
-#   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-#   theme(legend.position = c(0.3,0.5), legend.background=element_rect(fill = alpha("white", 0)),
-#                                             legend.key=element_rect(fill = alpha("white", .5)),
-#         legend.title = element_text(size=8)) +
-#   coord_sf(xlim = c(-127,-123.5),
-#            ylim = c(41.4,49)); fig_1b
-
 # Focal ESU distributions: violin
-esu_lat <- hdat %>% dplyr::select(haul_join, esu, catch_esu_ia_8, lat, lon) %>%   # Using 0.8 threshold right now! But maybe change later to composite proportion if figure out the SE.
+esu_lat <- full_dat %>% dplyr::select(haul_join, esu, catch_esu_ia_8, lat, lon) %>%   # Using 0.8 threshold right now! But maybe change later to composite proportion if figure out the SE.
   filter(catch_esu_ia_8 > 0 & 
            esu %in% c("klam_trinity", "sor_nca", "or_coast", "pug", "so_bc"))
 
@@ -146,27 +141,8 @@ dev.off()
 
 # Figures 1d, 1e, 1f: Chinook bycatch histogram, Chinook bycatch by fishing depths, Fishing effort by time of day.
 
-# # Fig 1d: Chinook catch histogram
-# catch_dat <- h_chinook %>%  mutate(count_bins = cut(chinook_count, breaks=c(-1,0.5,10,20,30,40,50,100,200,300)  ))  %>% 
-#   group_by(count_bins) %>% count()
-# 
-# levels(catch_dat$count_bins) <- c("0", "10", "20", "30", "40", "50", "100", "200", "300")
-# 
-# fig_1d <- ggplot(data=catch_dat, aes(x=count_bins, y=n)) + 
-#   geom_bar(stat="identity", color="black", fill="gray88") + theme_classic() +
-#   scale_y_continuous(expand=c(0,0), limits=c(0,11000), name="Number of hauls", oob=squish) + 
-#   xlab("Chinook caught per haul") +
-#   geom_text(aes(label=n, y = n+600), size=4, angle=45) +
-#   theme(strip.background = element_blank(), strip.text.x = element_blank()) +
-#   theme(axis.line = element_line(colour = "black"),
-#         panel.grid.major = element_blank(),
-#         panel.grid.minor = element_blank(),
-#         #panel.border = element_blank(),
-#         panel.background = element_blank()); fig_1d
-
-
 # Fig 1d: Fishing effort by fishing depth
-depth_dat <- all_dat %>% 
+depth_dat <- haul_dat %>% 
   mutate(fishing_bins = cut(fishing_m, breaks=seq(0,600,by=100))) %>% 
   group_by(fishing_bins) %>% 
   summarise(mean_bpue = mean(bpue),
@@ -190,12 +166,11 @@ fig_1e <- ggplot(data=depth_dat, aes(x=fishing_m, y=mean_bpue)) +
   geom_errorbar(aes(ymin=mean_bpue+se_bpue, ymax=mean_bpue-se_bpue), width=0) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 3.5), expand = c(0,0)) +
-  ylab("Observed Chinook\nbycatch per hour") + xlab("Fishing depth (m)");  fig_1e
-#geom_text(aes(label=count_hauls, y=mean_bpue + se_bpue+ 0.2), size=4, angle=45); fig_1e
+  ylab("Observed Chinook bycatch per hour") + xlab("Fishing depth (m)");  fig_1e
 
 
 # Fig 1f: Circular histogram: time of day
-fig_1f <- ggplot(data=all_dat, aes(x=time_num/3600)) + geom_histogram(color="black", fill="lightblue", alpha=0.5) +
+fig_1f <- ggplot(data=haul_dat, aes(x=time_num/3600)) + geom_histogram(color="black", fill="lightblue", alpha=0.5) +
   coord_polar("x") + theme_bw() + scale_x_continuous(breaks=seq(0,24, by=1), name ="Time of Day") + 
   ylab("Number of hauls") + theme(panel.grid.major=element_line(color="gray50")) +
   theme(panel.border = element_blank()) +
@@ -219,7 +194,7 @@ dvm_plot_fun <- function(data, model, title, response){
   av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
   newdata <- data %>% data_grid(time_num = seq_range(time_num, 50, pretty=T),
                                 fishing_m = c(50, 100, 200, 300, 400),
-                                duration = 120,
+                                duration = 60,
                                 lat = av_lat,
                                 .model = model)
   pred_out <- predict(model, newdata, se.fit=T)
@@ -233,7 +208,7 @@ dvm_plot_fun <- function(data, model, title, response){
 } # end function
 
 
-fig_2a <- dvm_plot_fun(data=all_dat, response="chinook_count", model=full_mod, title="(a) All Chinook catch"); fig_2a
+fig_2a <- dvm_plot_fun(data=haul_dat, response="chinook_count", model=full_mod, title="(a) All Chinook catch"); fig_2a
 
 # By ESU: south to north
 fig_2b <- dvm_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity"); fig_2b
@@ -251,13 +226,36 @@ ggarrange(fig_2a, fig_2b, fig_2c, fig_2d, fig_2e, fig_2f, ncol=3, nrow=2, common
 dev.off()
 
 
+# Day: 1.3 Chinook per hour is highest BPUE in Fig 2a: 50 fishing depths at 12:30.
+newdata_dvm1 <- haul_dat %>% data_grid(time_num = 12.5*60*60,
+                                       fishing_m = 50,
+                                       duration = rep(60, length.out=20),
+                                       .model = full_mod)
+exp(predict(full_mod, newdata_dvm1)) #1.3 bpue
+
+# Day: concurrent at 200 m depth: 
+newdata_dvm2 <- haul_dat %>% data_grid(time_num = 12.5*60*60,
+                                       fishing_m = 200,
+                                       duration = rep(60, length.out=20),
+                                       .model = full_mod)
+exp(predict(full_mod, newdata_dvm2)) # 0.136 bpue; 1.3 / 0.136 = 9.6 times lower than concurrent bpue at 50m.
+
+# Night: concurrent at 200 m depth: 
+newdata_dvm3 <- haul_dat %>% data_grid(time_num = 0,
+                                       fishing_m = 200,
+                                       duration = rep(60, length.out=20),
+                                       .model = full_mod)
+exp(predict(full_mod, newdata_dvm3)) # 0.45 bpue; 0.45 / 0.136 = 3.3 times higher than same depth (200 m) between day and night.
+
+
+
 # Figure 3: Thermal refugia ----
 
 ref_plot_fun <- function(data, model, title, response){
   av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
   newdata <- data %>% data_grid(fishing_m = seq_range(fishing_m, 50, pretty=T),
                                 sst_mean = c(10, 12, 14, 16, 18),
-                                duration = 120,
+                                duration = 60,
                                 lat = av_lat,
                                 .model = model) %>% 
     filter(fishing_m < 401 & fishing_m > 30)
@@ -276,7 +274,7 @@ ref_plot_fun_16 <- function(data, model, title, response){
   av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
   newdata <- data %>% data_grid(fishing_m = seq_range(fishing_m, 50, pretty=T),
                                 sst_mean = c(10, 12, 14, 16),
-                                duration = 120,
+                                duration = 60,
                                 lat = av_lat,
                                 .model = model) %>% 
     filter(fishing_m < 401 & fishing_m > 30)
@@ -292,14 +290,14 @@ ref_plot_fun_16 <- function(data, model, title, response){
 } # end function.
 
 
-fig_3a <- ref_plot_fun(data=all_dat, response="chinook_count", model=full_mod, title="(a) All Chinook catch"); fig_3a
+fig_3a <- ref_plot_fun(data=haul_dat, response="chinook_count", model=full_mod, title="(a) All Chinook catch"); fig_3a
 
 # By ESU: south to north
-fig_3b <- ref_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity") + coord_cartesian(ylim=c(0,0.03)); fig_3b
-fig_3c <- ref_plot_fun(data=esu_dat$data[[5]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[5]], title="(c) S. OR - N. CA") + coord_cartesian(ylim=c(0,0.13)); fig_3c
-fig_3d <- ref_plot_fun(data=esu_dat$data[[2]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[2]], title="(d) OR Coast") + coord_cartesian(ylim=c(0,0.3)); fig_3d
-fig_3e <- ref_plot_fun_16(data=esu_dat$data[[3]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[3]], title="(e) Puget Sound") + coord_cartesian(ylim=c(0,0.15)); fig_3e
-fig_3f <- ref_plot_fun_16(data=esu_dat$data[[4]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[4]], title="(f) S. BC") + coord_cartesian(ylim=c(0,0.017)); fig_3f
+fig_3b <- ref_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity") + coord_cartesian(ylim=c(0,0.02)); fig_3b
+fig_3c <- ref_plot_fun(data=esu_dat$data[[5]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[5]], title="(c) S. OR - N. CA") + coord_cartesian(ylim=c(0,0.07)); fig_3c
+fig_3d <- ref_plot_fun(data=esu_dat$data[[2]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[2]], title="(d) OR Coast") + coord_cartesian(ylim=c(0,0.17)); fig_3d
+fig_3e <- ref_plot_fun_16(data=esu_dat$data[[3]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[3]], title="(e) Puget Sound") + coord_cartesian(ylim=c(0,0.12)); fig_3e
+fig_3f <- ref_plot_fun_16(data=esu_dat$data[[4]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[4]], title="(f) S. BC") + coord_cartesian(ylim=c(0,0.008)); fig_3f
 
 
 # Save plot
@@ -311,10 +309,26 @@ ggarrange(fig_3a, fig_3b, fig_3c, fig_3d, fig_3e, fig_3f, ncol=3, nrow=2, common
 dev.off()
 
 
+# When SST near 18 degrees, almost 0 bpue in surface waters (50 m)
+newdata_ref1 <- haul_dat %>% data_grid(sst_mean = 18,
+                                  fishing_m = 50,
+                                  duration = rep(60, length.out=20),
+                                  .model = full_mod)
+exp(predict(full_mod, newdata_ref1)) #0.05 bpue
+
+# When SST near 18 degrees, 0.63 bpue at 250 m
+newdata_ref2 <- haul_dat %>% data_grid(sst_mean = 18,
+                                       fishing_m = 250,
+                                       duration = rep(60, length.out=20),
+                                       .model = full_mod)
+exp(predict(full_mod, newdata_ref2)) # 0.63 bpue; 1.3 / 0.136 = 9.6 times lower than concurrent bpue at 50m.
+
+
+
 # Figure 4: Annual bycatch by annual SST ----
 
 # Get annual SST values from haul locations.
-sst_dat <- all_dat %>% group_by(year) %>% 
+sst_dat <- haul_dat %>% group_by(year) %>% 
   summarise(mean_sst = mean(sst_mean),
             count_sst = length(sst_mean),
             sd_sst = sd(sst_mean)) %>% 
@@ -322,8 +336,8 @@ sst_dat <- all_dat %>% group_by(year) %>%
 
 
 # Get model predictions of bycatch per effort for year term in the model.
-newdata <- all_dat %>% data_grid(year = seq(2002,2021, by=1),
-                                 duration = rep(120, length.out=20),
+newdata <- haul_dat %>% data_grid(year = seq(2002,2021, by=1),
+                                 duration = rep(60, length.out=20),
                                  .model = full_mod)
 pred_out <- predict(full_mod, newdata, se.fit=T)
 pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
@@ -351,13 +365,18 @@ fig_4
 
 dev.off()
 
-# Figure 5: DVM & Thermal refugia ----
 
-ref_dvm_dat <- h_chinook %>% filter(fishing_m < 600) %>%
-  drop_na() %>% 
+
+# Figure 5: DVM & Thermal refugia ----
+day_night_dat <- full_dat %>% dplyr::select(haul_join, day_night) %>% distinct()
+
+ref_dvm_dat <- haul_dat %>% 
+  left_join(day_night_dat) %>% 
+  filter(fishing_m < 600) %>%
   mutate(depth_bin = cut(fishing_m, breaks=seq(0,600,by=100)),
-         bpue = chinook_count / duration *60) %>% 
-  mutate(sst_bin = ifelse(sst_mean > 14, "(b) SST > 14 degrees C", 
+         lat_bin = ifelse(lat > 45, "north", "south"),
+         bpue = chinook_count / duration *60,
+         sst_bin = ifelse(sst_mean > 14, "(b) SST > 14 degrees C", 
                           ifelse(sst_mean < 14, "(a) SST < 14 degrees C", "middle"))) %>% 
   group_by(depth_bin, day_night, sst_bin) %>%
   summarise(mean_chinook = mean(chinook_count),
@@ -370,44 +389,11 @@ ref_dvm_dat <- h_chinook %>% filter(fishing_m < 600) %>%
          day_night = ifelse(day_night == "day", "Day", "Night"))
 ref_dvm_dat
 
-ref_dvm_dat$fishing_m <- rep(seq(50,550,by=100), each=4)
-
-# Expand data for scenarios
-depth_dat <- depth_dat %>% mutate(p_hauls = count_hauls / 54518)
-
-scenario_dat1 <- ref_dvm_dat %>% rename("fishing_bins" = "depth_bin") %>% 
-  left_join(dplyr::select(depth_dat, fishing_bins, p_hauls)) %>% 
-  mutate(night_fishing_bin = "Even")
-
-scenario_dat <- scenario_dat1 %>% 
-  mutate(night_fishing_bin = "Restrictions") %>% 
-  rbind(scenario_dat1) %>% 
-  mutate(num_tows = ifelse(night_fishing_bin == "Restrictions" & day_night == "Night", 250,
-                           ifelse(night_fishing_bin == "Restrictions" & day_night == "Day", 750, 500))) %>%
-  dplyr::select(1:3,5,11:14) %>% 
-  mutate(tot_bycatch = num_tows * p_hauls * mean_bpue)
-
-scenario_dat %>% group_by(sst_bin, night_fishing_bin) %>% summarise(tot_bycatch = sum(tot_bycatch)) # This is amazing!!!
-sum_dat <- scenario_dat %>% group_by(sst_bin, night_fishing_bin, day_night) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>% 
-  mutate(scenario_cat = ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Even", "<14 &\nNo restrictions", 
-                               ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Restrictions", "<14 &\nRestrictions",
-                                      ifelse(sst_bin == "(b) SST > 14 degrees C" & night_fishing_bin == "Even", ">14 &\nNo restrictions", ">14 &\nRestrictions"))))
-sum_dat
-
-# Make multiple figures
-# Split facets manually because will make arranging multiple figures easier.
-bpue <- ref_dvm_dat %>% filter(sst_bin == "(b) SST > 14 degrees C")
-cool_dat <-ref_dvm_dat %>% filter(sst_bin == "(a) SST < 14 degrees C")
-
-warm_dat_sc <- scenario_dat %>% filter()
-
-
-# Flipped facets
 
 fig_5a <- ggplot(data=ref_dvm_dat, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
   geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
   facet_wrap(~sst_bin, ncol=1) +
-  scale_y_continuous(limits=c(0,3.6), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
+  scale_y_continuous(limits=c(0,5), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
   geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
   scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
   scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
@@ -429,11 +415,61 @@ fig_5a
 dev.off()
 
 
-# Total abundance
-fig_5b <- ggplot(data=scenario_dat, aes(x=as.factor(fishing_bins), y=tot_bycatch, fill=day_night)) +
+# Expand data for scenarios
+depth_dat <- depth_dat %>% mutate(p_hauls = count_hauls / 54509)
+
+scenario_dat1 <- ref_dvm_dat %>% rename("fishing_bins" = "depth_bin") %>% 
+  left_join(dplyr::select(depth_dat, fishing_bins, p_hauls)) %>% 
+  mutate(night_fishing_bin = "Even")
+
+scenario_dat <- scenario_dat1 %>% 
+  mutate(night_fishing_bin = "Restrictions") %>% 
+  rbind(scenario_dat1) %>% 
+  mutate(num_tows = ifelse(night_fishing_bin == "Restrictions" & day_night == "Night", 250,
+                           ifelse(night_fishing_bin == "Restrictions" & day_night == "Day", 750, 500))) %>%
+  dplyr::select(1:3,5,11:13) %>% 
+  mutate(tot_bycatch = num_tows * p_hauls * mean_bpue)
+
+scenario_dat %>% group_by(sst_bin, night_fishing_bin) %>% summarise(tot_bycatch = sum(tot_bycatch)) # This is amazing!!!
+
+sum_dat <- scenario_dat %>% group_by(sst_bin, night_fishing_bin, day_night) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>% 
+  mutate(scenario_cat = ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Even", "<14 & No restrictions", 
+                               ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Restrictions", "<14 & Restrictions",
+                                      ifelse(sst_bin == "(b) SST > 14 degrees C" & night_fishing_bin == "Even", ">14 & No restrictions", ">14 & Restrictions"))))
+sum_dat
+
+
+
+#### VERSION WITH LATITUDE BINS TOO!
+
+# Figure 5: DVM & Thermal refugia ----
+day_night_dat <- full_dat %>% dplyr::select(haul_join, day_night) %>% distinct()
+
+ref_dvm_dat2 <- haul_dat %>% 
+  left_join(day_night_dat) %>% 
+  filter(fishing_m < 600) %>%
+  mutate(depth_bin = cut(fishing_m, breaks=seq(0,600,by=100)),
+         lat_bin = ifelse(lat > 45, "north", "south"),
+         bpue = chinook_count / duration *60,
+         sst_bin = ifelse(sst_mean > 14, "(b) SST > 14 degrees C", 
+                          ifelse(sst_mean < 14, "(a) SST < 14 degrees C", "middle"))) %>% 
+  group_by(depth_bin, day_night, sst_bin, lat_bin) %>%
+  summarise(mean_chinook = mean(chinook_count),
+            mean_bpue = mean(bpue),
+            sd_chinook = sd(chinook_count),
+            sd_bpue = sd(bpue),
+            count = length(chinook_count)) %>% 
+  mutate(se = sd_chinook / sqrt(count),
+         se_bpue = sd_bpue / sqrt(count),
+         day_night = ifelse(day_night == "day", "Day", "Night"))
+ref_dvm_dat2
+
+
+fig_5a2 <- ggplot(data=ref_dvm_dat2, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
   geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
-  facet_wrap(~sst_bin + night_fishing_bin, ncol=2) +
-  scale_y_continuous(limits=c(0,500), expand=c(0,0), name = "Estimated Chinook bycatch per 1000 hours") + theme_bw() +
+  facet_wrap(~sst_bin + lat_bin, ncol=2) +
+  scale_y_continuous(limits=c(0,5), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
+  geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
   scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
   scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
   xlab("Fishing depth bin (m)") +
@@ -442,22 +478,43 @@ fig_5b <- ggplot(data=scenario_dat, aes(x=as.factor(fishing_bins), y=tot_bycatch
         panel.grid.major = element_blank(),
         panel.grid.minor = element_blank(),
         panel.background = element_blank(),
-        legend.position = "top", legend.title = element_blank()); fig_5b
+        legend.position = "top", legend.title = element_blank()) +
+  geom_text(aes(label=count, y = mean_bpue + se_bpue + 0.3), size=3, position=position_dodge(0.9)); fig_5a2
 
 
-fig_5c <- ggplot(data=sum_dat, aes(x=scenario_cat, y=tot_bycatch, fill=day_night)) +
-  geom_bar(stat="identity", color="black") + theme_bw() + 
-  scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
-  scale_y_continuous(limits=c(0,1000), expand=c(0,0), name = "Estimated Chinook bycatch per 1000 hours") +
-  theme(axis.line = element_line(colour = "black"),
-        panel.grid.major = element_blank(),
-        panel.grid.minor = element_blank(),
-        panel.background = element_blank(),
-        legend.position = "top", legend.title = element_blank()); fig_5c
+# setwd("C:/Users/sabalm/Desktop/")
+# pdf("Fig_5.pdf", width=6, height=6, onefile=FALSE)
+# 
+# fig_5a
+# 
+# dev.off()
+
+
+# Expand data for scenarios
+depth_dat <- depth_dat %>% mutate(p_hauls = count_hauls / 54509)
+
+scenario_dat1 <- ref_dvm_dat2 %>% rename("fishing_bins" = "depth_bin") %>% 
+  left_join(dplyr::select(depth_dat, fishing_bins, p_hauls)) %>% 
+  mutate(tow_hrs = ifelse(day_night == "Night", 500, 500)) 
+  
+scenario_dat2 <- scenario_dat1 %>% mutate(tow_hrs = ifelse(day_night == "Night", 250, 750)) 
+  
+scenario_dat <- rbind(scenario_dat1, scenario_dat2) %>% 
+  mutate(tot_bycatch = tow_hrs * p_hauls * mean_bpue,
+         night_restrict = ifelse(tow_hrs == 250 | tow_hrs == 750, "Restrictions", "Even"))
+
+# How does total bycatch vary by scenario?
+scenario_dat %>% group_by(sst_bin, lat_bin, night_restrict) %>% summarise(tot_bycatch = sum(tot_bycatch)) # This is amazing!!!
+
+sum_dat <- scenario_dat %>% group_by(sst_bin, night_fishing_bin, day_night) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>% 
+  mutate(scenario_cat = ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Even", "<14 & No restrictions", 
+                               ifelse(sst_bin == "(a) SST < 14 degrees C" & night_fishing_bin == "Restrictions", "<14 & Restrictions",
+                                      ifelse(sst_bin == "(b) SST > 14 degrees C" & night_fishing_bin == "Even", ">14 & No restrictions", ">14 & Restrictions"))))
+sum_dat
 
 
 
-ggarrange(fig_5a, fig_5b, ncol=2, common.legend = TRUE)
+
 
 
 # Figure S1: ESU: bpue by fishing depth ----

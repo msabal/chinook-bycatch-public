@@ -356,7 +356,7 @@ pred_out <- predict(full_mod, newdata, se.fit=T)
 pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
 pred_t <- left_join(pred_t, sst_dat) # Join predicted annual bycatch estimates with mean SST values.
 
-# Figure 3
+# Figure 4
 fig_4 <- ggplot(data=pred_t, aes(x=mean_sst, y=exp(fit), fill=mean_sst)) + 
   stat_smooth(method = "lm", fill= "gray88", color = "gray75", alpha=0) +
   geom_point(shape=21, size=3) +
@@ -453,8 +453,6 @@ fig_5c <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_b
   annotate(geom = "text", label = "Night fishing restrictions would\ndecrease bycatch by 19.7%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5c
 fig_5d <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == ">14C"), title="(d) South: warm SSTs") +
 annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 0.8%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5d
-
-ggarrange(fig_5a, fig_5b, fig_5c, fig_5d, ncol=2, nrow=2, common.legend = TRUE)
 
 
  setwd("C:/Users/sabalm/Desktop/")
@@ -728,5 +726,4 @@ ggarrange(fig_s5a, fig_s5b, fig_s5c, fig_s5d, fig_s5e, ncol=3, nrow=2, common.le
 dev.off()
 
 
-# Figure S4: ----
 

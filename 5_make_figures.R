@@ -387,7 +387,7 @@ ref_dvm_dat <- haul_dat %>%
   left_join(day_night_dat) %>%
   filter(fishing_m < 600) %>%
   mutate(depth_bin = cut(fishing_m, breaks=seq(0,600,by=100)),
-         lat_bin = ifelse(lat > 45, ">45 lat", "<45 lat"),
+         lat_bin = ifelse(lat > 45.77, ">45 lat", "<45 lat"),
          bpue = chinook_count / duration *60,
          sst_bin = ifelse(sst_mean > 14, ">14C",
                           ifelse(sst_mean < 14, "<14C", "other"))) %>%
@@ -404,17 +404,30 @@ ref_dvm_dat
 
 
 # Expand data for scenarios
-depth_dat <- depth_dat %>% mutate(p_hauls = count_hauls / 54509)
+depth_dat2 <- haul_dat %>% 
+  mutate(fishing_bins = cut(fishing_m, breaks=seq(0,600,by=100))) %>% 
+  group_by(fishing_bins) %>% 
+  summarise(mean_bpue = mean(bpue),
+            count_hauls = length(bpue),
+            bpue_sd = sd(bpue)) %>% 
+  mutate(se_bpue = bpue_sd / sqrt(count_hauls)) %>% 
+  mutate(fishing_m = seq(50,650,by=100))
+depth_dat2
+
+# Define variables for number of hours to extrapolate over.
+tot_hrs <- 1000
+
+depth_dat2 <- depth_dat2 %>% mutate(p_hauls = count_hauls / 54509)
 
 scenario_dat1 <- ref_dvm_dat %>% rename("fishing_bins" = "depth_bin") %>% 
-  left_join(dplyr::select(depth_dat, fishing_bins, p_hauls)) %>% 
-  mutate(tow_hrs = ifelse(day_night == "Night", 500, 500)) 
+  left_join(dplyr::select(depth_dat2, fishing_bins, p_hauls)) %>% 
+  mutate(tow_hrs = ifelse(day_night == "Night", tot_hrs*0.5, tot_hrs*0.5)) 
 
-scenario_dat2 <- scenario_dat1 %>% mutate(tow_hrs = ifelse(day_night == "Night", 250, 750)) 
+scenario_dat2 <- scenario_dat1 %>% mutate(tow_hrs = ifelse(day_night == "Night", tot_hrs*0.25, tot_hrs*0.75)) 
 
 scenario_dat <- rbind(scenario_dat1, scenario_dat2) %>% 
   mutate(tot_bycatch = tow_hrs * p_hauls * mean_bpue,
-         night_restrict = ifelse(tow_hrs == 250 | tow_hrs == 750, "Restrictions", "Even"))
+         night_restrict = ifelse(tow_hrs == tot_hrs*0.25 | tow_hrs == tot_hrs*0.75, "Restrictions", "Even"))
 
 # How does total bycatch vary by scenario?
 scenario_dat %>% group_by(sst_bin, lat_bin, night_restrict) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>%  # This is amazing!!!
@@ -446,13 +459,13 @@ obs_dvm_plot_fun <- function(data, title){
 
 
 fig_5a <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == ">45 lat" & sst_bin == "<14C"), title="(a) North: cool SSTs") +
-  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 22.5%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5a
+  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 22.9%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5a
 fig_5b <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == ">45 lat" & sst_bin == ">14C"), title="(b) North: warm SSTs") +
-  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 36.7%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5b
+  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 43.9%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5b
 fig_5c <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == "<14C"), title="(c) South: cool SSTs") +
-  annotate(geom = "text", label = "Night fishing restrictions would\ndecrease bycatch by 19.7%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5c
+  annotate(geom = "text", label = "Night fishing restrictions would\ndecrease bycatch by 19.8%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5c
 fig_5d <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == ">14C"), title="(d) South: warm SSTs") +
-annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 0.8%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5d
+annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 1.2%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5d
 
 
  setwd("C:/Users/sabalm/Desktop/")

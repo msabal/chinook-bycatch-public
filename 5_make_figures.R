@@ -1,6 +1,6 @@
 # Making Figures for PNAS
 
-library(scales); library(raster); library(ggrepel); library(ggridges)
+library(scales); library(raster); library(ggrepel); library(ggridges); library(ggpubr)
 
 # Run script 4 (4_run_models.R) FIRST.
 
@@ -277,6 +277,7 @@ ref_plot_fun <- function(data, model, title, response){
   
   ggplot(data=pred_t, aes(x=(fishing_m), y=exp(fit))) + 
     geom_ribbon(aes(ymin=exp(fit - se), ymax=exp(fit + se), fill=as.factor(sst_mean)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(sst_mean))) + theme_classic() +
+    scale_x_continuous(breaks=c(seq(0,400,by=50))) +
     ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
     theme(legend.position = "bottom") + ylab(label="Predicted Chinook bycatch per hour") + xlab(label="Fishing depth (m)") +
     scale_fill_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62", "#b2182b"), name=expression("SST " ( degree*C))) +
@@ -296,6 +297,7 @@ ref_plot_fun_16 <- function(data, model, title, response){
   
   ggplot(data=pred_t, aes(x=(fishing_m), y=exp(fit))) + 
     geom_ribbon(aes(ymin=exp(fit-se), ymax=exp(fit+se), fill=as.factor(sst_mean)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(sst_mean))) + theme_classic() +
+    scale_x_continuous(breaks=c(seq(0,400,by=50))) +
     ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
     theme(legend.position = "bottom") + ylab(label="Predicted Chinook bycatch per hour") + xlab(label="Fishing depth (m)") +
     scale_fill_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62"), name=expression("SST " ( degree*C))) +
@@ -380,7 +382,7 @@ dev.off()
 
 
 
-# # Figure 5: DVM & Thermal refugia (with sst and lat bins) ----
+# Figure 5: DVM & Thermal refugia (with sst and lat bins) ----
 day_night_dat <- full_dat %>% dplyr::select(haul_join, day_night) %>% distinct()
  
 ref_dvm_dat <- haul_dat %>%
@@ -442,7 +444,7 @@ scenario_dat %>% group_by(sst_bin, lat_bin, night_restrict) %>% summarise(tot_by
 obs_dvm_plot_fun <- function(data, title){
   ggplot(data=data, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
     geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
-    scale_y_continuous(limits=c(0,5), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
+    scale_y_continuous(limits=c(0,5.3), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
     geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
     scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
     scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
@@ -704,6 +706,8 @@ ggarrange(fig_s3a, fig_s3b, fig_s3c, fig_s3d, ncol=2, nrow=2)
 dev.off()
 
 
+
+
 # Figure S4: ESU probability of occurrence DVM ----
 
 fig_s4a <- dvm_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s4a
@@ -739,4 +743,40 @@ ggarrange(fig_s5a, fig_s5b, fig_s5c, fig_s5d, fig_s5e, ncol=3, nrow=2, common.le
 dev.off()
 
 
+
+# Figure S6: Observed annual BPUE by SST ----
+
+# Get annual SST values from haul locations.
+sst_dat <- haul_dat %>% group_by(year) %>% 
+  summarise(mean_sst = mean(sst_mean),
+            count_sst = length(sst_mean),
+            sd_sst = sd(sst_mean)) %>% 
+  mutate(se_sst = sd_sst / sqrt(count_sst))
+
+
+# Calculate observed BPUE by year
+yr_sst_data <- haul_dat %>% group_by(year) %>% summarise(tot_bycatch = sum(chinook_count)) %>% 
+  left_join(sst_dat)
+
+# Figure 4
+fig_s6 <- ggplot(data=yr_sst_data, aes(x=mean_sst, y=tot_bycatch, fill=mean_sst)) + 
+  stat_smooth(method = "lm", fill= "gray88", color = "gray75", alpha=0) +
+  geom_point(shape=21, size=3) +
+  theme_classic() + theme(legend.position = c(0.7,0.1), legend.direction="horizontal", 
+                          legend.background=element_rect(fill=alpha("white", 0)),
+                          legend.key=element_rect(fill=alpha("white", 0.5))) +
+  scale_fill_gradient(low="royalblue", high="red", name=expression("SST " ( degree*C))) +
+  ylab("Observed total Chinook bycatch") + xlab("Mean annual SST") +
+  geom_label_repel(aes(label = year), size=3, box.padding = 0.2, point.padding = 0.1, 
+                   segment.color = 'grey50', fill="transparent", label.size = NA); fig_s6
+
+summary(lm(tot_bycatch ~ mean_sst, data=yr_sst_data)) # summary of linear relationship in plot.
+
+# Plots to Save
+setwd("C:/Users/sabalm/Desktop/")
+pdf("Fig_s6.pdf", width=5, height=4, onefile=FALSE)
+
+fig_s6
+
+dev.off()
 

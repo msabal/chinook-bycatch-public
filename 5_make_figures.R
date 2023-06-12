@@ -1,6 +1,6 @@
 # Making Figures for PNAS
 
-library(scales); library(raster); library(ggrepel); library(ggridges); library(ggpubr)
+library(scales); library(raster); library(ggrepel); library(ggridges); library(ggpubr); library(sf)
 
 # Run script 4 (4_run_models.R) FIRST.
 
@@ -111,11 +111,11 @@ fig_1b <- ggplot() + theme_classic() +
   geom_tile(data=map_dat, aes(lon, lat, fill = log(bpue)), stat = "identity", alpha=0.5) +
   geom_sf(data=states2, fill = "gray95") +
   geom_sf(data=gb_cont_200, size=0.8) +
-  scale_fill_viridis(name="log(BPUE)") +
+  scale_fill_viridis(name="log(bycatch\nrate)") +
   #scale_fill_gradient(low="royalblue", high="firebrick3", name="log(BPUE)") +
   theme(axis.title.x = element_blank(), axis.title.y=element_blank()) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  theme(legend.position = c(0.2,0.5), legend.background=element_rect(fill = alpha("white", 0)),
+  theme(legend.position = c(0.25,0.5), legend.background=element_rect(fill = alpha("white", 0)),
         legend.key=element_rect(fill = alpha("white", .5)),
         legend.title = element_text(size=8)) +
   coord_sf(xlim = c(-127,-123.5),
@@ -170,7 +170,7 @@ fig_1d <- ggplot(data=depth_dat, aes(x=fishing_m, y=count_hauls)) +
   geom_bar(stat="identity", color="black", fill="gray30") + theme_classic() +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 21000), expand = c(0,0)) +
-  ylab("Number of hauls") + xlab("Fishing depth (m)"); fig_1d
+  ylab("Number of hauls\n ") + xlab("Fishing depth (m)"); fig_1d
 
 # Fig 1e: Chinook bycatch by fishing depth
 
@@ -179,7 +179,7 @@ fig_1e <- ggplot(data=depth_dat, aes(x=fishing_m, y=mean_bpue)) +
   geom_errorbar(aes(ymin=mean_bpue+se_bpue, ymax=mean_bpue-se_bpue), width=0) +
   coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
   scale_y_continuous(limits=c(0, 3.5), expand = c(0,0)) +
-  ylab("Observed Chinook bycatch per hour") + xlab("Fishing depth (m)");  fig_1e
+  ylab("Observed Chinook salmon\nbycatch per hour") + xlab("Fishing depth (m)");  fig_1e
 
 
 # Fig 1f: Circular histogram: time of day
@@ -199,8 +199,71 @@ ggarrange(fig_1d, fig_1e, fig_1f, ncol=3)
 dev.off()
 
 
+# Figure 2: Thermal refugia ----
 
-# Figure 2: DVM ----
+ref_plot_fun <- function(data, model, title, response){
+  av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
+  newdata <- data %>% data_grid(fishing_m = seq_range(fishing_m, 50, pretty=T),
+                                sst_mean = c(10, 12, 14, 16, 18),
+                                duration = 60,
+                                lat = av_lat,
+                                .model = model) %>% 
+    filter(fishing_m < 401 & fishing_m > 30)
+  pred_out <- predict(model, newdata, se.fit=T)
+  pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
+  
+  ggplot(data=pred_t, aes(x=(fishing_m), y=exp(fit))) + 
+    geom_ribbon(aes(ymin=exp(fit - se), ymax=exp(fit + se), fill=as.factor(sst_mean)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(sst_mean))) + theme_classic() +
+    scale_x_continuous(breaks=c(seq(0,400,by=50))) +
+    ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
+    theme(legend.position = "bottom") + ylab(label="Predicted Chinook salmon\nbycatch per hour") + xlab(label="Fishing depth (m)") +
+    scale_fill_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62", "#b2182b"), name=expression("SST " ( degree*C))) +
+    scale_color_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62", "#b2182b"), name=expression("SST " ( degree*C)))
+} # end function.
+
+ref_plot_fun_16 <- function(data, model, title, response){
+  av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
+  newdata <- data %>% data_grid(fishing_m = seq_range(fishing_m, 50, pretty=T),
+                                sst_mean = c(10, 12, 14, 16),
+                                duration = 60,
+                                lat = av_lat,
+                                .model = model) %>% 
+    filter(fishing_m < 401 & fishing_m > 30)
+  pred_out <- predict(model, newdata, se.fit=T)
+  pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
+  
+  ggplot(data=pred_t, aes(x=(fishing_m), y=exp(fit))) + 
+    geom_ribbon(aes(ymin=exp(fit-se), ymax=exp(fit+se), fill=as.factor(sst_mean)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(sst_mean))) + theme_classic() +
+    scale_x_continuous(breaks=c(seq(0,400,by=50))) +
+    ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
+    theme(legend.position = "bottom") + ylab(label="Predicted Chinook salmon\nbycatch per hour") + xlab(label="Fishing depth (m)") +
+    scale_fill_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62"), name=expression("SST " ( degree*C))) +
+    scale_color_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62"), name=expression("SST " ( degree*C)))
+} # end function.
+
+
+fig_2a <- ref_plot_fun(data=haul_dat, response="chinook_count", model=full_mod, title="(a) All Chinook salmon"); fig_2a
+
+# By ESU: south to north
+fig_2b <- ref_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity") + coord_cartesian(ylim=c(0,0.02)); fig_2b
+fig_2c <- ref_plot_fun(data=esu_dat$data[[5]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[5]], title="(c) S. OR - N. CA") + coord_cartesian(ylim=c(0,0.07)); fig_2c
+fig_2d <- ref_plot_fun(data=esu_dat$data[[2]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[2]], title="(d) OR Coast") + coord_cartesian(ylim=c(0,0.17)); fig_2d
+fig_2e <- ref_plot_fun_16(data=esu_dat$data[[3]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[3]], title="(e) Puget Sound") + coord_cartesian(ylim=c(0,0.12)); fig_2e
+fig_2f <- ref_plot_fun_16(data=esu_dat$data[[4]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[4]], title="(f) S. BC") + coord_cartesian(ylim=c(0,0.008)); fig_2f
+
+
+# Save plot
+setwd("C:/Users/sabalm/Desktop/")
+pdf("Fig_2.pdf", width=10, height=6, onefile=FALSE)
+
+ggarrange(fig_2a, fig_2b, fig_2c, fig_2d, fig_2e, fig_2f, ncol=3, nrow=2, common.legend = TRUE, legend="top")
+
+dev.off()
+
+
+
+
+# Figure 3: DVM ----
 
 # Make function for dvm plots with SE intervals.
 dvm_plot_fun <- function(data, model, title, response){
@@ -216,25 +279,25 @@ dvm_plot_fun <- function(data, model, title, response){
   ggplot(data=pred_t, aes(x=(time_num/3600), y=exp(fit))) + 
     geom_ribbon(aes(ymin=exp(fit-se), ymax=exp(fit+se), fill=as.factor(fishing_m)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(fishing_m))) + theme_classic() +
     ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
-    theme(legend.position = "bottom") + ylab(label="Predicted Chinook bycatch per hour") + xlab(label="Time (hours since midnight)") +
+    theme(legend.position = "bottom") + ylab(label="Predicted Chinook salmon\nbycatch per hour") + xlab(label="Time (hours since midnight)") +
     scale_fill_viridis(discrete = TRUE, direction=-1, name="Fishing depth (m)") + scale_color_viridis(discrete=TRUE, direction=-1, name="Fishing depth (m)")
 } # end function
 
 
-fig_2a <- dvm_plot_fun(data=haul_dat, response="chinook_count", model=full_mod, title="(a) All Chinook catch"); fig_2a
+fig_3a <- dvm_plot_fun(data=haul_dat, response="chinook_count", model=full_mod, title="(a) All Chinook salmon"); fig_3a
 
 # By ESU: south to north
-fig_2b <- dvm_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity"); fig_2b
-fig_2c <- dvm_plot_fun(data=esu_dat$data[[5]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[5]], title="(c) S. OR - N. CA"); fig_2c
-fig_2d <- dvm_plot_fun(data=esu_dat$data[[2]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[2]], title="(d) OR Coast"); fig_2d
-fig_2e <- dvm_plot_fun(data=esu_dat$data[[3]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[3]], title="(e) Puget Sound"); fig_2e
-fig_2f <- dvm_plot_fun(data=esu_dat$data[[4]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[4]], title="(f) S. BC"); fig_2f
+fig_3b <- dvm_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity"); fig_3b
+fig_3c <- dvm_plot_fun(data=esu_dat$data[[5]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[5]], title="(c) S. OR - N. CA"); fig_3c
+fig_3d <- dvm_plot_fun(data=esu_dat$data[[2]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[2]], title="(d) OR Coast"); fig_3d
+fig_3e <- dvm_plot_fun(data=esu_dat$data[[3]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[3]], title="(e) Puget Sound"); fig_3e
+fig_3f <- dvm_plot_fun(data=esu_dat$data[[4]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[4]], title="(f) S. BC"); fig_3f
 
 # Save plot
 setwd("C:/Users/sabalm/Desktop/")
-pdf("Fig_2.pdf", width=10, height=6, onefile=FALSE) # for ncol=4, width=12, height=6
+pdf("fig_3.pdf", width=10, height=6, onefile=FALSE) # for ncol=4, width=12, height=6
 
-ggarrange(fig_2a, fig_2b, fig_2c, fig_2d, fig_2e, fig_2f, ncol=3, nrow=2, common.legend = TRUE, legend="top")
+ggarrange(fig_3a, fig_3b, fig_3c, fig_3d, fig_3e, fig_3f, ncol=3, nrow=2, common.legend = TRUE, legend="top")
 
 dev.off()
 
@@ -262,66 +325,6 @@ exp(predict(full_mod, newdata_dvm3)) # 0.45 bpue; 0.45 / 0.136 = 3.3 times highe
 
 
 
-# Figure 3: Thermal refugia ----
-
-ref_plot_fun <- function(data, model, title, response){
-  av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
-  newdata <- data %>% data_grid(fishing_m = seq_range(fishing_m, 50, pretty=T),
-                                sst_mean = c(10, 12, 14, 16, 18),
-                                duration = 60,
-                                lat = av_lat,
-                                .model = model) %>% 
-    filter(fishing_m < 401 & fishing_m > 30)
-  pred_out <- predict(model, newdata, se.fit=T)
-  pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
-  
-  ggplot(data=pred_t, aes(x=(fishing_m), y=exp(fit))) + 
-    geom_ribbon(aes(ymin=exp(fit - se), ymax=exp(fit + se), fill=as.factor(sst_mean)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(sst_mean))) + theme_classic() +
-    scale_x_continuous(breaks=c(seq(0,400,by=50))) +
-    ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
-    theme(legend.position = "bottom") + ylab(label="Predicted Chinook bycatch per hour") + xlab(label="Fishing depth (m)") +
-    scale_fill_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62", "#b2182b"), name=expression("SST " ( degree*C))) +
-    scale_color_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62", "#b2182b"), name=expression("SST " ( degree*C)))
-} # end function.
-
-ref_plot_fun_16 <- function(data, model, title, response){
-  av_lat <- data %>% filter(response > 0) %>% summarise(av_lat = median(lat)) %>% pull()
-  newdata <- data %>% data_grid(fishing_m = seq_range(fishing_m, 50, pretty=T),
-                                sst_mean = c(10, 12, 14, 16),
-                                duration = 60,
-                                lat = av_lat,
-                                .model = model) %>% 
-    filter(fishing_m < 401 & fishing_m > 30)
-  pred_out <- predict(model, newdata, se.fit=T)
-  pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
-  
-  ggplot(data=pred_t, aes(x=(fishing_m), y=exp(fit))) + 
-    geom_ribbon(aes(ymin=exp(fit-se), ymax=exp(fit+se), fill=as.factor(sst_mean)), alpha=0.2) + geom_line(size=1, aes(color=as.factor(sst_mean))) + theme_classic() +
-    scale_x_continuous(breaks=c(seq(0,400,by=50))) +
-    ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5)) + 
-    theme(legend.position = "bottom") + ylab(label="Predicted Chinook bycatch per hour") + xlab(label="Fishing depth (m)") +
-    scale_fill_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62"), name=expression("SST " ( degree*C))) +
-    scale_color_manual(values=c("#2166ac", "#67a9cf", "#FDDBC7", "#ef8a62"), name=expression("SST " ( degree*C)))
-} # end function.
-
-
-fig_3a <- ref_plot_fun(data=haul_dat, response="chinook_count", model=full_mod, title="(a) All Chinook catch"); fig_3a
-
-# By ESU: south to north
-fig_3b <- ref_plot_fun(data=esu_dat$data[[1]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[1]], title="(b) Klamath - Trinity") + coord_cartesian(ylim=c(0,0.02)); fig_3b
-fig_3c <- ref_plot_fun(data=esu_dat$data[[5]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[5]], title="(c) S. OR - N. CA") + coord_cartesian(ylim=c(0,0.07)); fig_3c
-fig_3d <- ref_plot_fun(data=esu_dat$data[[2]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[2]], title="(d) OR Coast") + coord_cartesian(ylim=c(0,0.17)); fig_3d
-fig_3e <- ref_plot_fun_16(data=esu_dat$data[[3]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[3]], title="(e) Puget Sound") + coord_cartesian(ylim=c(0,0.12)); fig_3e
-fig_3f <- ref_plot_fun_16(data=esu_dat$data[[4]], response="catch_esu_ia_8", model=esu_dat$gam_esu_c8[[4]], title="(f) S. BC") + coord_cartesian(ylim=c(0,0.008)); fig_3f
-
-
-# Save plot
-setwd("C:/Users/sabalm/Desktop/")
-pdf("Fig_3.pdf", width=10, height=6, onefile=FALSE)
-
-ggarrange(fig_3a, fig_3b, fig_3c, fig_3d, fig_3e, fig_3f, ncol=3, nrow=2, common.legend = TRUE, legend="top")
-
-dev.off()
 
 
 # When SST near 18 degrees, almost 0 bpue in surface waters (50 m)
@@ -340,14 +343,20 @@ exp(predict(full_mod, newdata_ref2)) # 0.63 bpue; 1.3 / 0.136 = 9.6 times lower 
 
 
 
-# Figure 4: Annual bycatch by annual SST ----
+# Figure 5: Annual bycatch by annual SST ----
 
 # Get annual SST values from haul locations.
-sst_dat <- haul_dat %>% group_by(year) %>% 
+annual_dat <- haul_dat %>% group_by(year) %>% 
   summarise(mean_sst = mean(sst_mean),
             count_sst = length(sst_mean),
             sd_sst = sd(sst_mean)) %>% 
   mutate(se_sst = sd_sst / sqrt(count_sst))
+
+# Get raw total bycatch #s
+annual_dat <- full_dat %>% dplyr::select(haul_join, chinook_count, year, duration) %>%  distinct() %>% 
+  group_by(year) %>% summarize(total_bycatch = sum(chinook_count),
+                               total_duration = sum(duration)) %>% 
+  left_join(annual_dat)
 
 
 # Get model predictions of bycatch per effort for year term in the model.
@@ -356,126 +365,44 @@ newdata <- haul_dat %>% data_grid(year = seq(2002,2021, by=1),
                                  .model = full_mod)
 pred_out <- predict(full_mod, newdata, se.fit=T)
 pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
-pred_t <- left_join(pred_t, sst_dat) # Join predicted annual bycatch estimates with mean SST values.
+annual_dat <- left_join(pred_t, annual_dat) # Join predicted annual bycatch estimates with mean SST values.
+
 
 # Figure 4
-fig_4 <- ggplot(data=pred_t, aes(x=mean_sst, y=exp(fit), fill=mean_sst)) + 
+fig_5 <- ggplot(data=annual_dat, aes(x=mean_sst, y=exp(fit), fill=mean_sst)) + 
   stat_smooth(method = "lm", fill= "gray88", color = "gray75", alpha=0) +
   geom_point(shape=21, size=3) +
-  theme_classic() + theme(legend.position = c(0.7,0.1), legend.direction="horizontal", 
+  theme_classic() + theme(legend.position = c(0.3,0.8), legend.direction="horizontal", 
                           legend.background=element_rect(fill=alpha("white", 0)),
                           legend.key=element_rect(fill=alpha("white", 0.5))) +
   scale_fill_gradient(low="royalblue", high="red", name=expression("SST " ( degree*C))) +
-  ylab("Predicted Chinook bycatch per hour") + xlab("Mean annual SST") +
+  ylab("Predicted Chinook salmon\nbycatch per hour") + xlab("Mean annual SST") +
+  ylim(c(0,0.2)) +
   geom_label_repel(aes(label = year), size=3, box.padding = 0.2, point.padding = 0.1, 
-                   segment.color = 'grey50', fill="transparent", label.size = NA); fig_4
+                   segment.color = 'grey50', fill="transparent", label.size = NA); fig_5
 
-summary(lm(exp(fit) ~ mean_sst, data=pred_t)) # summary of linear relationship in plot.
+summary(lm(exp(fit) ~ mean_sst, data=annual_dat)) # summary of linear relationship in plot.
 
 # Plots to Save
 setwd("C:/Users/sabalm/Desktop/")
-pdf("Fig_4.pdf", width=5, height=4, onefile=FALSE)
+pdf("Fig_5.pdf", width=5, height=4, onefile=FALSE)
 
-fig_4
+fig_5
 
 dev.off()
 
+# Text summary:
+# 2008 bycatch per hour value
+v08 <- annual_dat %>% filter(year == 2008) %>% dplyr::select(fit) %>% pull()
+exp(v08) * 7170  # bycatch per hour * annual average hours of towing = 51 salmon
+
+# 2014 bycatch per hour value
+v14 <- annual_dat %>% filter(year == 2014) %>% dplyr::select(fit) %>% pull()
+exp(v14) * 7170 # bycatch per hour * annual average hours of towing = 1352 salmon
 
 
-# Figure 5: DVM & Thermal refugia (with sst and lat bins) ----
-day_night_dat <- full_dat %>% dplyr::select(haul_join, day_night) %>% distinct()
- 
-ref_dvm_dat <- haul_dat %>%
-  left_join(day_night_dat) %>%
-  filter(fishing_m < 600) %>%
-  mutate(depth_bin = cut(fishing_m, breaks=seq(0,600,by=100)),
-         lat_bin = ifelse(lat > 45.77, ">45 lat", "<45 lat"),
-         bpue = chinook_count / duration *60,
-         sst_bin = ifelse(sst_mean > 14, ">14C",
-                          ifelse(sst_mean < 14, "<14C", "other"))) %>%
-  group_by(depth_bin, day_night, sst_bin, lat_bin) %>%
-  summarise(mean_chinook = mean(chinook_count),
-            mean_bpue = mean(bpue),
-            sd_chinook = sd(chinook_count),
-            sd_bpue = sd(bpue),
-            count = length(chinook_count)) %>%
-  mutate(se = sd_chinook / sqrt(count),
-         se_bpue = sd_bpue / sqrt(count),
-         day_night = ifelse(day_night == "day", "Day", "Night"))
-ref_dvm_dat
 
 
-# Expand data for scenarios
-depth_dat2 <- haul_dat %>% 
-  mutate(fishing_bins = cut(fishing_m, breaks=seq(0,600,by=100))) %>% 
-  group_by(fishing_bins) %>% 
-  summarise(mean_bpue = mean(bpue),
-            count_hauls = length(bpue),
-            bpue_sd = sd(bpue)) %>% 
-  mutate(se_bpue = bpue_sd / sqrt(count_hauls)) %>% 
-  mutate(fishing_m = seq(50,650,by=100))
-depth_dat2
-
-# Define variables for number of hours to extrapolate over.
-tot_hrs <- 1000
-
-depth_dat2 <- depth_dat2 %>% mutate(p_hauls = count_hauls / 54509)
-
-scenario_dat1 <- ref_dvm_dat %>% rename("fishing_bins" = "depth_bin") %>% 
-  left_join(dplyr::select(depth_dat2, fishing_bins, p_hauls)) %>% 
-  mutate(tow_hrs = ifelse(day_night == "Night", tot_hrs*0.5, tot_hrs*0.5)) 
-
-scenario_dat2 <- scenario_dat1 %>% mutate(tow_hrs = ifelse(day_night == "Night", tot_hrs*0.25, tot_hrs*0.75)) 
-
-scenario_dat <- rbind(scenario_dat1, scenario_dat2) %>% 
-  mutate(tot_bycatch = tow_hrs * p_hauls * mean_bpue,
-         night_restrict = ifelse(tow_hrs == tot_hrs*0.25 | tow_hrs == tot_hrs*0.75, "Restrictions", "Even"))
-
-# How does total bycatch vary by scenario?
-scenario_dat %>% group_by(sst_bin, lat_bin, night_restrict) %>% summarise(tot_bycatch = sum(tot_bycatch)) %>%  # This is amazing!!!
-  pivot_wider(names_from = night_restrict, values_from = tot_bycatch) %>% 
-  mutate(p_night_effectivness = (Restrictions - Even)/Even*100)
-# percentage reduction in bycatch (negative number) due to night fishing restrictions. Positive
-# numbers indicate bycatch was higher with night fishing restrictions.
-# Put these values as text in Figs 5a-d.
-
-
-# Make function for observed DVM plots with SE bars.
-obs_dvm_plot_fun <- function(data, title){
-  ggplot(data=data, aes(x=as.factor(depth_bin), y=mean_bpue, fill=day_night)) +
-    geom_bar(stat="identity", color="black", alpha=0.7, position=position_dodge(0.9, preserve='single')) +
-    scale_y_continuous(limits=c(0,5.3), expand=c(0,0), name = "Observed Chinook bycatch per hour") + theme_bw() +
-    geom_errorbar(aes(ymin=mean_bpue-se_bpue, ymax=mean_bpue+se_bpue), color="black", width=0, position=position_dodge(0.9, preserve='single')) +
-    scale_fill_manual(values=c("gold", "gray22"), name="Time bin") +
-    scale_color_manual(values=c("gold", "gray22"), name="Time bin") +
-    xlab("Fishing depth bin (m)") +
-    theme(strip.text = element_text(face = "bold", size=14)) +
-    theme(axis.line = element_line(colour = "black"),
-          panel.grid.major = element_blank(),
-          panel.grid.minor = element_blank(),
-          panel.background = element_blank(),
-          legend.position = "top", legend.title = element_blank()) +
-    geom_text(aes(label=count, y = mean_bpue + se_bpue + 0.3), size=3, position=position_dodge(0.9)) +
-    ggtitle(label = title) + theme(plot.title = element_text(hjust = 0.5))
-} # end function
-
-
-fig_5a <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == ">45 lat" & sst_bin == "<14C"), title="(a) North: cool SSTs") +
-  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 22.9%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5a
-fig_5b <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == ">45 lat" & sst_bin == ">14C"), title="(b) North: warm SSTs") +
-  annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 43.9%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5b
-fig_5c <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == "<14C"), title="(c) South: cool SSTs") +
-  annotate(geom = "text", label = "Night fishing restrictions would\ndecrease bycatch by 19.8%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5c
-fig_5d <- obs_dvm_plot_fun(data=filter(ref_dvm_dat, lat_bin == "<45 lat" & sst_bin == ">14C"), title="(d) South: warm SSTs") +
-annotate(geom = "text", label = "Night fishing restrictions would\nincrease bycatch by 1.2%", x=4.5, y=4.5, fontface="italic", size=3.5); fig_5d
-
-
- setwd("C:/Users/sabalm/Desktop/")
- pdf("Fig_5.pdf", width=8.5, height=8, onefile=FALSE)
-
- ggarrange(fig_5a, fig_5b, fig_5c, fig_5d, ncol=2, nrow=2, common.legend = TRUE)
-
- dev.off()
 
 
 
@@ -632,6 +559,84 @@ dev.off()
 
 
 
+# Figure S3: Fishing depth by day vs. night and warm vs. cool SSTs ----
+
+# Fishing depth by day vs. night
+
+# Add columns to haul_dat with day-night and cool-warm categories
+haul_dat <- haul_dat %>% 
+  left_join(dplyr::select(full_dat, haul_join, day_night) %>% distinct()) %>% 
+  mutate(sst_cat = ifelse(sst_mean > 14, "warm", "cool"))
+
+# day-night data
+depth_dat_daynight <- haul_dat %>% 
+  mutate(fishing_bins = cut(fishing_m, breaks=seq(0,600,by=100))) %>% 
+  group_by(fishing_bins, day_night) %>% 
+  summarise(mean_bpue = mean(bpue),
+            count_hauls = length(bpue),
+            bpue_sd = sd(bpue)) %>% 
+  drop_na() %>% 
+  mutate(se_bpue = bpue_sd / sqrt(count_hauls)) %>% 
+  mutate(day_night2 = ifelse(day_night == "day", "(a) Day", "(b) Night"))
+depth_dat_daynight
+
+depth_dat_daynight$fishing_m <- rep(seq(50, 550, by=100), each=2)
+
+
+# warm-cool data
+depth_dat_sst <- haul_dat %>% 
+  mutate(fishing_bins = cut(fishing_m, breaks=seq(0,600,by=100))) %>% 
+  group_by(fishing_bins, sst_cat) %>% 
+  summarise(mean_bpue = mean(bpue),
+            count_hauls = length(bpue),
+            bpue_sd = sd(bpue)) %>% 
+  drop_na() %>% 
+  mutate(se_bpue = bpue_sd / sqrt(count_hauls)) %>% 
+  mutate(sst_cat2 = ifelse(sst_cat == "cool", "(c) Cool", "(d) Warm"))
+depth_dat_sst
+
+depth_dat_sst$fishing_m <- rep(seq(50, 550, by=100), each=2)
+
+# day-night fig
+fig_s3ab <- ggplot(data=depth_dat_daynight, aes(x=fishing_m, y=count_hauls)) + 
+  geom_bar(stat="identity", color="black", aes(fill=day_night2)) + theme_bw() +
+  coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
+  ylab("Number of hauls") + xlab("Fishing depth (m)") +
+  scale_fill_manual(values=c("gold", "gray22")) +
+  facet_wrap(~day_night2, ncol=2, scales = "free") +
+  theme(axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 12),
+        legend.position = "none") ; fig_s3ab
+
+
+# warm-cool fig
+fig_s3cd <- ggplot(data=depth_dat_sst, aes(x=fishing_m, y=count_hauls)) + 
+  geom_bar(stat="identity", color="black", aes(fill=sst_cat2)) + theme_bw() +
+  coord_flip() + scale_x_reverse(breaks=seq(0,600,by=50)) +
+  ylab("Number of hauls") + xlab("Fishing depth (m)") +
+  scale_fill_manual(values=c("royalblue", "firebrick2")) +
+  facet_wrap(~sst_cat2, ncol=2, scales = "free") +
+  theme(axis.line = element_line(color='black'),
+        plot.background = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        strip.text.x = element_text(size = 12),
+        legend.position = "none"); fig_s3cd
+
+
+# All four plots of fishing depth by (a) day, (b) night, (c) cool, and (d) warm.
+fig_s3_abcd <- ggarrange(fig_s3ab, fig_s3cd, ncol=1, nrow=2); fig_s3_abcd
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s3.pdf", width=8, height=8, onefile=FALSE)
+
+fig_s3_abcd
+
+dev.off()
+
 
 
 # Figure S3: Hurdle model plots ----
@@ -744,6 +749,80 @@ dev.off()
 
 
 
+# Figure S4: ESU no threshold DVM ----
+
+fig_s4a <- dvm_plot_fun(data=esu_dat$data[[1]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[1]], title="(a) Klamath - Trinity"); fig_s4a
+fig_s4b <- dvm_plot_fun(data=esu_dat$data[[5]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[5]], title="(b) S. OR - N. CA"); fig_s4b
+fig_s4c <- dvm_plot_fun(data=esu_dat$data[[2]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[2]], title="(c) OR Coast"); fig_s4c
+fig_s4d <- dvm_plot_fun(data=esu_dat$data[[3]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[3]], title="(d) Puget Sound"); fig_s4d
+fig_s4e <- dvm_plot_fun(data=esu_dat$data[[4]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[4]], title="(e) S. BC"); fig_s4e
+
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s4.pdf", width=9, height=6, onefile=FALSE)
+
+ggarrange(fig_s4a, fig_s4b, fig_s4c, fig_s4d, fig_s4e, ncol=3, nrow=2, common.legend = TRUE)
+
+dev.off()
+
+
+
+# Figure S5: ESU no threshold Refugia ----
+
+fig_s5a <- ref_plot_fun(data=esu_dat$data[[1]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[1]], title="(a) Klamath - Trinity") + coord_cartesian(ylim=c(0,0.2)); fig_s5a
+fig_s5b <- ref_plot_fun(data=esu_dat$data[[5]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[5]], title="(b) S. OR - N. CA")  + coord_cartesian(ylim=c(0,3)); fig_s5b
+fig_s5c <- ref_plot_fun(data=esu_dat$data[[2]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[2]], title="(c) OR Coast") + coord_cartesian(ylim=c(0,0.3)); fig_s5c
+fig_s5d <- ref_plot_fun_16(data=esu_dat$data[[3]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[3]], title="(d) Puget Sound") + coord_cartesian(ylim=c(0,0.3)); fig_s5d
+fig_s5e <- ref_plot_fun_16(data=esu_dat$data[[4]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[4]], title="(e) S. BC") + coord_cartesian(ylim=c(0,0.4)); fig_s5e
+
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s5.pdf", width=9, height=6, onefile=FALSE)
+
+ggarrange(fig_s5a, fig_s5b, fig_s5c, fig_s5d, fig_s5e, ncol=3, nrow=2, common.legend = TRUE)
+
+dev.off()
+
+
+# Figure S4: ESU probability of occurrence DVM ----
+
+fig_s4a <- dvm_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s4a
+fig_s4b <- dvm_plot_fun_pa(data=esu_dat$data[[5]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[5]], title="(b) S. OR - N. CA"); fig_s4b
+fig_s4c <- dvm_plot_fun_pa(data=esu_dat$data[[2]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[2]], title="(c) OR Coast"); fig_s4c
+fig_s4d <- dvm_plot_fun_pa(data=esu_dat$data[[3]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[3]], title="(d) Puget Sound"); fig_s4d
+fig_s4e <- dvm_plot_fun_pa(data=esu_dat$data[[4]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[4]], title="(e) S. BC"); fig_s4e
+
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s4.pdf", width=9, height=6, onefile=FALSE)
+
+ggarrange(fig_s4a, fig_s4b, fig_s4c, fig_s4d, fig_s4e, ncol=3, nrow=2, common.legend = TRUE)
+
+dev.off()
+
+
+
+# Figure S5: ESU probability of occurrence Refugia ----
+
+fig_s5a <- ref_plot_fun_pa(data=esu_dat$data[[1]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[1]], title="(a) Klamath - Trinity"); fig_s5a
+fig_s5b <- ref_plot_fun_pa(data=esu_dat$data[[5]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[5]], title="(b) S. OR - N. CA"); fig_s5b
+fig_s5c <- ref_plot_fun_pa(data=esu_dat$data[[2]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[2]], title="(c) OR Coast"); fig_s5c
+fig_s5d <- ref_plot_fun_16_pa(data=esu_dat$data[[3]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[3]], title="(d) Puget Sound"); fig_s5d
+fig_s5e <- ref_plot_fun_16_pa(data=esu_dat$data[[4]], response="esu_pa", model=esu_dat$gam_esu_c8_pa[[4]], title="(e) S. BC"); fig_s5e
+
+
+setwd("C:/Users/sabalm/Desktop/")
+pdf("fig_s5.pdf", width=9, height=6, onefile=FALSE)
+
+ggarrange(fig_s5a, fig_s5b, fig_s5c, fig_s5d, fig_s5e, ncol=3, nrow=2, common.legend = TRUE)
+
+dev.off()
+
+
+
+
+
+
 # Figure S6: Observed annual BPUE by SST ----
 
 # Get annual SST values from haul locations.
@@ -780,3 +859,130 @@ fig_s6
 
 dev.off()
 
+
+
+
+
+
+
+# Figure SX: ESU: annual bycatch by SST ----
+
+# for Focal ESUs: year
+year_grid_fun <- function(data, model){
+  lat_pred <- data %>% filter(catch_esu_ia_8 > 0) %>% # generate unique lat to predict over - median positive catch for that ESU.
+    summarise(lat_pred=median(lat)) %>% pull()
+  
+  newdata <- data %>% data_grid(year = seq(2008, 2015),
+                                duration = rep(130, length.out = 50),
+                                lat = lat_pred,
+                                .model = model)
+  pred_out <- predict(model, newdata, se.fit=T)
+  pred_t <- as_tibble(data.frame(fit = pred_out$fit, se = pred_out$se.fit)) %>% bind_cols(newdata)
+  pred_t$upr <- pred_t$fit + (1.96 * pred_t$se) # change se to 95% confidence intervals. 95% CI = fit + 1.96 * sd/sqrt(n) (but sd/sqrt(n) is se!)
+  pred_t$lwr <- pred_t$fit - (1.96 * pred_t$se)
+  return(pred_t)
+}
+
+# Generate data_grids and predictions with se for all model-data pairs!
+foc_dat <- esu_dat %>%
+  mutate(preds = map2(data, gam_esu_c8, year_grid_fun))
+foc_dat
+
+# Unnest so we can plot.
+preds_esu_dat <- unnest(foc_dat, preds) %>% dplyr::select(esu, fit, se, year) %>% 
+  left_join(annual_dat %>% dplyr::select(year, mean_sst))
+
+# Plots
+
+# Change ESU level names and order
+levels(as.factor(preds_esu_dat$esu))
+
+preds_esu_dat$esu <- as.factor(preds_esu_dat$esu)
+levels(preds_esu_dat$esu) <- c("Klamath - Trinity", "OR Coast", "Puget Sound", "S. BC", "S. OR - N. CA")
+
+preds_esu_dat <- preds_esu_dat %>% mutate(esu = fct_relevel(esu, "Klamath - Trinity", "S. OR - N. CA", "OR Coast", "Puget Sound", "S. BC"))
+levels(preds_esu_dat$esu)
+
+
+
+# Figure #
+fig_sx <- ggplot(data=preds_esu_dat, aes(x=mean_sst, y=exp(fit), fill=esu)) + 
+  stat_smooth(method = "lm", fill= "gray88", color = "gray75", alpha=0) +
+  geom_point(shape=21, size=3) +
+  theme_classic() +
+  ylab("Predicted Chinook salmon\nbycatch per hour") + xlab("Mean annual SST") +
+  geom_label_repel(aes(label = year), size=3, box.padding = 0.2, point.padding = 0.1, 
+                   segment.color = 'grey50', fill="transparent", label.size = NA) +
+  facet_wrap(~esu, scales="free") +
+  theme(legend.position = "none"); fig_sx
+
+# summary(lm(exp(fit) ~ mean_sst, data=(preds_esu_dat %>% filter(esu == "Klamath - Trinity")))) # 
+# summary(lm(exp(fit) ~ mean_sst, data=(preds_esu_dat %>% filter(esu == "S. OR - N. CA")))) # 
+# summary(lm(exp(fit) ~ mean_sst, data=(preds_esu_dat %>% filter(esu == "OR Coast")))) # 
+# summary(lm(exp(fit) ~ mean_sst, data=(preds_esu_dat %>% filter(esu == "Puget Sound")))) # 
+# summary(lm(exp(fit) ~ mean_sst, data=(preds_esu_dat %>% filter(esu == "S. BC")))) # 
+
+# Plots to Save
+setwd("C:/Users/sabalm/Desktop/")
+pdf("Fig_sx.pdf", width=8, height=5, onefile=FALSE)
+
+fig_sx
+
+dev.off()
+
+
+
+#### REGUIA with negative binomial
+
+fig_ref_nb <- ref_plot_fun(data=haul_dat, response="chinook_count", model=full_mod_nb, title="(a) All Chinook salmon"); fig_ref_nb 
+
+# Save plot
+setwd("C:/Users/sabalm/Desktop/")
+pdf("Fig_ref_nb.pdf", width=5, height=4, onefile=FALSE)
+
+fig_ref_nb
+
+dev.off()
+
+### DVM with negative binomial
+
+fig_dvm_nb <- dvm_plot_fun(data=haul_dat, response="chinook_count", model=full_mod_nb, title="(a) All Chinook salmon"); fig_dvm_nb
+
+# Save plot
+setwd("C:/Users/sabalm/Desktop/")
+pdf("Fig_dvm_nb.pdf", width=5, height=4, onefile=FALSE)
+
+fig_dvm_nb
+
+dev.off()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### REFUGIA with no filter
+
+# By ESU: south to north
+fig_2b <- ref_plot_fun(data=esu_dat$data[[1]], response="catch_esu", model=esu_dat$gam_all_esu_c0[[1]], title="(b) Klamath - Trinity") + coord_cartesian(ylim=c(0,0.02)); fig_2b
+fig_2c <- ref_plot_fun(data=esu_dat$data[[5]], response="catch_esu", model=esu_dat$gam_esu_c0[[5]], title="(c) S. OR - N. CA") + coord_cartesian(ylim=c(0,0.07)); fig_2c
+fig_2d <- ref_plot_fun(data=esu_dat$data[[2]], response="catch_esu", model=esu_dat$gam_esu_c0[[2]], title="(d) OR Coast") + coord_cartesian(ylim=c(0,0.17)); fig_2d
+fig_2e <- ref_plot_fun_16(data=esu_dat$data[[3]], response="catch_esu", model=esu_dat$gam_esu_c0[[3]], title="(e) Puget Sound") + coord_cartesian(ylim=c(0,0.12)); fig_2e
+fig_2f <- ref_plot_fun_16(data=esu_dat$data[[4]], response="catch_esu", model=esu_dat$gam_esu_c0[[4]], title="(f) S. BC") + coord_cartesian(ylim=c(0,0.008)); fig_2f
+
+
+# Save plot
+setwd("C:/Users/sabalm/Desktop/")
+pdf("Fig_2.pdf", width=10, height=6, onefile=FALSE)
+
+ggarrange(fig_2a, fig_2b, fig_2c, fig_2d, fig_2e, fig_2f, ncol=3, nrow=2, common.legend = TRUE, legend="top")
+
+dev.off()
